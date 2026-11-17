@@ -4,6 +4,16 @@
 
 Windows 10 / 11 x64 · 单文件 EXE · MIT
 
+> **来源与维护说明**
+>
+> 本项目源自 [liuxiaogang-com/desktop-icon-billiards](https://github.com/liuxiaogang-com/desktop-icon-billiards)（MIT，作者 **LXG**），原始代码与美术资产的版权归原作者所有，[LICENSE](LICENSE) 保持原样。
+>
+> 本仓库由 [Truce-Lee](https://github.com/Truce-Lee) 独立维护，**不是原仓库的 GitHub fork**，与原作者没有隶属关系，也不代表原作者的发布。
+>
+> 相对上游 v0.1.5，这里新增了**局域网双人对战**：房主权威物理、30 Hz 快照流、回合与犯规规则、可选监听网卡与端口、对手球杆可视化，详见 [docs/LAN.md](docs/LAN.md)。
+>
+> 注意：下面「下载」一节给的是**上游官方版本**，它没有联机功能；本仓库的构建请用 `build.ps1` 自行打包，或使用本仓库 Release 里的 EXE。
+
 ![实机画面：桌面图标排成球阵，白球瞄准库边，虚线显示反弹路线](docs/images/desktop-gameplay.jpg)
 
 ## 下载

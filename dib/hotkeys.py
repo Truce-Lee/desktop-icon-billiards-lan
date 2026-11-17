@@ -8,7 +8,7 @@ import win32api
 import win32con
 import win32gui
 
-from . import config
+from . import config, diag
 
 
 class Hotkeys:
@@ -30,6 +30,10 @@ class Hotkeys:
         for identifier, key in ((config.HOTKEY_ID, config.HOTKEY_VK),):
             if user32.RegisterHotKey(self.hwnd, identifier, config.HOTKEY_MODIFIERS | 0x4000, key):
                 self.registered.add(identifier)
+            else:
+                # Windows answers 1409 when another program already owns the accelerator.
+                # The toolbar's 退出 button and Esc still work, so this is only logged.
+                diag.log(f'hotkey {identifier:#06x} is already registered by another program')
 
     def _message(self, hwnd, message, wparam, lparam):
         if message == win32con.WM_HOTKEY and wparam in self.registered:

@@ -22,8 +22,10 @@ from . import config, diag
 from .display import dpi_context
 from .hotkeys import Hotkeys
 from .instance import acquire_instance, claim_instance_mutex, publish_version
+from .lanplay import LanPlay
+from .net import Client as LanClient, Server as LanServer, parse_address
 from .overlay import BilliardsOverlay
-from .panel import MainPanel, ResultDialog, format_duration, show_update_dialog
+from .panel import ACCENT, LanDialog, MainPanel, ResultDialog, WARN, format_duration, show_update_dialog
 from .paths import runtime_directory
 from .rank import RankApi, RankController, RankSettings, average_seconds, data_directory
 from .runner import BilliardsRunner
@@ -87,13 +89,15 @@ class DesktopBilliardsApp:
         self.guide_enabled = True
         self.result_dialog = None
         self.result_serial = None
+        self.lan_dialog = None
+        self.lan_endpoint = None
         self.update_results = queue.SimpleQueue()
         self.settings = self.make_settings()
         self.felt_enabled = bool(self.settings.get('felt', True))
         self.panel = panel = MainPanel(root, config.VERSION, {
             'restart': self.restart, 'toggle_guide': self.toggle_guide, 'toggle_rank': self.toggle_rank,
             'check_updates': lambda: self.check_updates(manual=True), 'donate': self.show_donation,
-            'quit': self.close, 'toggle_felt': self.toggle_felt,
+            'quit': self.close, 'toggle_felt': self.toggle_felt, 'lan': self.open_lan,
             'open_credit': self.open_credit,
         }, config.CREDIT)
         publish_version(root, config.VERSION)
@@ -136,6 +140,7 @@ class DesktopBilliardsApp:
 
     def refresh_buttons(self):
         self.refresh_rank_button()
+        self.refresh_lan_button()
         self.panel.set_look('guide', '辅助线 开' if self.guide_enabled else '辅助线 关',
                             'on' if self.guide_enabled else 'off')
         self.panel.set_look('felt', '台面 开' if self.felt_enabled else '台面 关')
@@ -321,15 +326,25 @@ class DesktopBilliardsApp:
                 pocketed = table.pocketed_icons
                 finished = state == 'finished'
                 self.time_title.set('总用时' if finished else '本局用时')
-                self.count_title.set('图标总数' if finished else '图标入袋')
-                self.count_value.set(str(total) if finished else f'{pocketed}/{total}')
+                lan = overlay.lan
+                if lan is None:
+                    self.count_title.set('图标总数' if finished else '图标入袋')
+                    self.count_value.set(str(total) if finished else f'{pocketed}/{total}')
+                else:
+                    mine, theirs = lan.scores()
+                    self.count_title.set('比分（我方:对手）')
+                    self.count_value.set(f'{mine} : {theirs}')
+                    self.refresh_lan_button()
+                    if self.lan_dialog is not None and self.lan_dialog.alive():
+                        self.lan_dialog.set_status(lan.status, ACCENT if lan.started else None)
                 self.remaining_value.set(str(total - pocketed))
-                try:
-                    self.rank.observe(table)
-                    self.update_result_dialog(overlay, table, finished)
-                except Exception:
-                    # Ranking and dialogs must never interrupt a game or the desktop restore.
-                    _write_log('rank.log', traceback.format_exc())
+                if lan is None:
+                    try:
+                        self.rank.observe(table)
+                        self.update_result_dialog(overlay, table, finished)
+                    except Exception:
+                        # Ranking and dialogs must never interrupt a game or the desktop restore.
+                        _write_log('rank.log', traceback.format_exc())
             self.root.after(50, self.poll)
         except Exception as exc:
             self.fail(exc)
@@ -351,6 +366,85 @@ class DesktopBilliardsApp:
         self.refresh_buttons()
         if self.runner:
             self.runner.overlay.want_felt = self.felt_enabled
+
+    # -- LAN play ----------------------------------------------------------
+    def lan_play(self):
+        """The live LAN session, or None while the desktop is still being taken over."""
+        if self.runner and self.runner.shown.is_set():
+            return self.runner.overlay.lan
+        return None
+
+    def refresh_lan_button(self):
+        lan = self.lan_play()
+        if lan is None:
+            self.panel.set_look('lan', '联机', 'off')
+        elif lan.error:
+            self.panel.set_look('lan', '联机 断开', 'off')
+        elif not lan.started:
+            self.panel.set_look('lan', '联机 等待', 'soft')
+        elif lan.finished:
+            self.panel.set_look('lan', '联机 结束', 'on')
+        elif lan.local_turn:
+            self.panel.set_look('lan', '联机 轮到你', 'on')
+        else:
+            self.panel.set_look('lan', '联机 对手回合', 'off')
+
+    def open_lan(self):
+        overlay = self.runner.overlay if self.runner and self.runner.shown.is_set() else None
+        if overlay is None or overlay.transition is not None:
+            messagebox.showinfo(config.PRODUCT_NAME, '请等桌面图标摆好再联机。', parent=self.root)
+            return
+        if overlay.lan is not None:
+            messagebox.showinfo(config.PRODUCT_NAME, f'联机状态：{overlay.lan.status}', parent=self.root)
+            return
+        if self.lan_dialog is not None and self.lan_dialog.alive():
+            self.lan_dialog.top.lift()
+            return
+        self.lan_dialog = LanDialog(self.root, {
+            'host': self.host_lan, 'join': self.join_lan, 'close': self.forget_lan_dialog,
+        }, config.LAN_PORT)
+
+    def forget_lan_dialog(self):
+        self.lan_dialog = None
+
+    def host_lan(self):
+        """Listen on the LAN port and wait for one opponent."""
+        if self.lan_endpoint is not None:
+            return
+        overlay = self.runner.overlay
+        try:
+            endpoint = LanServer(config.LAN_PORT).start()
+        except OSError as error:
+            if self.lan_dialog is not None:
+                self.lan_dialog.set_status(f'端口 {config.LAN_PORT} 无法监听：{error}', WARN)
+            return
+        self.attach_lan(overlay, 'host', endpoint)
+        if self.lan_dialog is not None:
+            self.lan_dialog.set_address(endpoint.address)
+            self.lan_dialog.set_status('把上面的地址发给对手；对方点「加入」后自动开局', ACCENT)
+
+    def join_lan(self, text):
+        """Connect to a host; the handshake decides whose icons become the balls."""
+        if self.lan_endpoint is not None:
+            return
+        overlay = self.runner.overlay
+        try:
+            host, port = parse_address(text, config.LAN_PORT)
+        except ValueError as error:
+            if self.lan_dialog is not None:
+                self.lan_dialog.set_status(str(error), WARN)
+            return
+        endpoint = LanClient(host, port).start()
+        self.attach_lan(overlay, 'guest', endpoint)
+        if self.lan_dialog is not None:
+            self.lan_dialog.set_status(f'正在连接 {host}:{port}…')
+
+    def attach_lan(self, overlay, role, endpoint):
+        self.lan_endpoint = endpoint
+        names = ('我', '对手') if role == 'host' else ('对手', '我')
+        overlay.lan = LanPlay(overlay, role, endpoint, names)
+        self.refresh_lan_button()
+        diag.log(f'lan: role={role} status={overlay.lan.status}')
 
     # -- round result ------------------------------------------------------
     def update_result_dialog(self, overlay, table, finished):
@@ -405,6 +499,9 @@ class DesktopBilliardsApp:
         self.close()
 
     def restore(self):
+        if self.lan_endpoint is not None:
+            self.lan_endpoint.close('quit')
+            self.lan_endpoint = None
         if self.runner:
             self.runner.stop()
             self.runner = None

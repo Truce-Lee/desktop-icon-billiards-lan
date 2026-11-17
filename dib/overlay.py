@@ -12,6 +12,7 @@ import os
 import platform
 import struct
 import threading
+import time
 from collections import OrderedDict
 from ctypes import wintypes as W
 
@@ -251,20 +252,29 @@ class LayerSurface:
 
 
 class TablePointer:
-    """Turn the held left mouse button into aim, charge and a shot."""
+    """Turn the held left mouse button into aim, charge and a shot.
+
+    In a LAN round the overlay replaces ``send``: the shot then leaves through the
+    network instead of being applied to the local table, and ``can_shoot`` /
+    ``can_place`` follow the turn order.
+    """
 
     def __init__(self):
         self.was_down = True
         self.held_since = None
         self.charge_origin = None
+        self.can_shoot = True
+        self.can_place = True
+        self.send = None
 
     def update(self, game, now, x, y, down, over_table):
         if over_table:
             game.aim_at(x, y)
         if down and not self.was_down and over_table:
             if game.state == 'ball_in_hand':
-                game.place_white(x, y)
-            elif game.state == 'ready':
+                if self.can_place:
+                    self._place(game, x, y)
+            elif game.state == 'ready' and self.can_shoot:
                 self.held_since = now
                 self.charge_origin = (x, y)
         if self.held_since is not None:
@@ -273,11 +283,23 @@ class TablePointer:
             if not down:
                 self.held_since = None
                 self.charge_origin = None
-                if over_table:
-                    game.shoot(max(MIN_SHOT_CHARGE, power), now)
+                if over_table and self.can_shoot:
+                    self._shoot(game, max(MIN_SHOT_CHARGE, power), now)
                 else:
                     game.charge = 0.0
         self.was_down = down
+
+    def _shoot(self, game, power, now):
+        if self.send is None:
+            game.shoot(power, now)
+        else:
+            self.send('shot', game.aim, power)
+
+    def _place(self, game, x, y):
+        if self.send is None:
+            game.place_white(x, y)
+        else:
+            self.send('place', x, y)
 
 
 class BilliardsOverlay:
@@ -310,6 +332,8 @@ class BilliardsOverlay:
         self.drawn = []
         self.poses = []
         self.transition = None
+        # A LanPlay session, once the player hosts or joins a LAN round.
+        self.lan = None
         self.restart_requested = threading.Event()
         self.pointer = TablePointer()
         self.table_windows = {}
@@ -524,6 +548,36 @@ class BilliardsOverlay:
     def request_restart(self):
         self.restart_requested.set()
 
+    def after_reset(self):
+        """Forget cached frames and the pointer after the table was reset from outside."""
+        self.pointer = TablePointer()
+        self.drawn = [None] * len(self.items)
+
+    def trim_balls(self, count):
+        """Match the shared rack size: hide the surplus icon windows, never move them."""
+        count = max(1, min(int(count), len(self.items)))
+        self.table.set_ball_count(count)
+        for index, hwnd in enumerate(self.windows):
+            if win32gui.IsWindow(hwnd):
+                win32gui.ShowWindow(
+                    hwnd, win32con.SW_HIDE if index >= count else win32con.SW_SHOWNOACTIVATE)
+        self.drawn = [None] * len(self.items)
+        diag.log(f'lan: rack trimmed to {count} balls')
+        return count
+
+    def lan_intent(self, kind, *args):
+        """Send a shot or a cue-ball placement through the LAN session."""
+        lan = self.lan
+        if lan is None:
+            return
+        if kind == 'shot':
+            aim, power = args
+            lan.shoot(aim, power, time.perf_counter())
+        elif kind == 'place':
+            x, y = args
+            left, top, right, bottom = self.table.bounds
+            lan.place((x - left) / max(1, right - left), (y - top) / max(1, bottom - top))
+
     def set_hidden(self, hidden, now):
         """Hide every game window and show the real icons again (or the reverse), pausing the round."""
         shown = win32con.SW_HIDE if hidden else win32con.SW_SHOWNOACTIVATE
@@ -579,10 +633,18 @@ class BilliardsOverlay:
             if self.restart_requested.is_set():
                 self.restart_requested.clear()
                 self.table.reset()
-                self.pointer = TablePointer()
-                self.drawn = [None] * len(self.items)
+                self.after_reset()
             self.update_pointer(now)
-            self.table.step(dt, now)
+            if self.lan is None:
+                self.table.step(dt, now)
+            else:
+                self.lan.pump(now)
+                if self.lan.is_host:
+                    # Only the host simulates; the guest just renders what arrives.
+                    self.table.step(dt, now)
+                    self.lan.after_step(now)
+                else:
+                    self.lan.render(now)
             self.draw_balls()
         self.draw_table()
         self.draw_guide()
@@ -612,6 +674,15 @@ class BilliardsOverlay:
         # primary (logical left) button is the physical right one.
         button = win32con.VK_RBUTTON if win32api.GetSystemMetrics(SM_SWAPBUTTON) else win32con.VK_LBUTTON
         down = bool(win32api.GetAsyncKeyState(button) & 0x8000)
+        lan = self.lan
+        if lan is None:
+            self.pointer.can_shoot = True
+            self.pointer.can_place = True
+            self.pointer.send = None
+        else:
+            self.pointer.can_shoot = lan.can_shoot()
+            self.pointer.can_place = lan.can_place()
+            self.pointer.send = self.lan_intent
         self.pointer.update(self.table, now, x, y, down, on_desktop)
 
     # -- drawing -----------------------------------------------------------

@@ -64,6 +64,9 @@ class BilliardsMotion:
         self.bodies = [self.white, *self.icons]
         self.sunk = set()
         self.white_sunk = False
+        # Index (1-based, as in ``self.icons``) of the first icon the cue ball touched
+        # during the current shot; ``None`` means the shot never reached a ball.
+        self.last_hit_index = None
         self.exits = {}
         self.state = 'ready'
         self.ready_for = 0.
@@ -87,6 +90,27 @@ class BilliardsMotion:
     @property
     def pocketed_icons(self):
         return len(self.sunk) - (0 in self.sunk)
+
+    def set_ball_count(self, count):
+        """Keep only the first ``count`` icons, so both players share one rack size.
+
+        A LAN round uses the smaller of the two desktops' icon counts; the host
+        calls this before the first shot, while the table is untouched, so the
+        dropped indices cannot be confused with potted balls.
+        """
+        count = max(1, min(int(count), len(self.icons)))
+        if count != len(self.icons):
+            # The rack is what ``reset`` rebuilds the icons from, so trim it too.
+            self.rack = self.rack[:count]
+            self.icons = self.icons[:count]
+            self.sizes = self.sizes[:count]
+            self.bodies = [self.white, *self.icons]
+            self.sunk = set()
+            self.white_sunk = False
+            self.exits = {}
+            self.last_hit_index = None
+            self.poses = self._poses()
+        return count
 
     @property
     def play_ms(self):
@@ -182,6 +206,7 @@ class BilliardsMotion:
         self.power = self._shot_speed(power)
         self.break_shot = False
         self.shots += 1
+        self.last_hit_index = None
         if self.first_shot_at is None:
             self.first_shot_at = self.clock if now is None else now
             self.clock = max(self.clock, self.first_shot_at)
@@ -477,6 +502,15 @@ class BilliardsMotion:
         b.impact = max(b.impact, impact)
         a.angle -= ny * impact * 95
         b.angle += ny * impact * 95
+        if self.last_hit_index is None:
+            # Remember what the cue ball struck first; the rules call a shot that never
+            # reaches an icon a foul.
+            other = b if a is self.white else a if b is self.white else None
+            if other is not None:
+                try:
+                    self.last_hit_index = self.icons.index(other) + 1
+                except ValueError:
+                    self.last_hit_index = None
 
     def _poses(self):
         result = []

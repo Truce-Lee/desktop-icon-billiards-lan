@@ -107,6 +107,7 @@ class MainPanel:
     DEFAULT_LOOK = {
         'guide': {'text': '辅助线 开', 'kind': 'on'},
         'rank': {'text': '排名', 'kind': 'off'},
+        'lan': {'text': '联机', 'kind': 'off'},
         # 'hide': {'text': '隐藏', 'kind': 'soft'},
         'felt': {'text': '台面 开', 'kind': 'ghost'},
         'update': {'text': '检查更新', 'kind': 'ghost'},
@@ -144,6 +145,7 @@ class MainPanel:
                 ('restart', '重新开始', callbacks['restart'], 'primary', True),
                 ('guide', '辅助线', callbacks['toggle_guide'], 'on', False),
                 ('rank', '排名', callbacks['toggle_rank'], 'off', False),
+                ('lan', '联机', callbacks['lan'], 'off', False),
                 # ('hide', '隐藏', None, 'soft', False),
                 ('felt', '台面', callbacks['toggle_felt'], 'ghost', False),
                 ('update', '检查更新', callbacks['check_updates'], 'ghost', False),
@@ -338,3 +340,84 @@ def show_update_dialog(root, current, info, entries, on_download):
     x = max(0, root.winfo_x() + root.winfo_width() - dialog.winfo_reqwidth())
     dialog.geometry(f'+{x}+{root.winfo_y() + root.winfo_height() + 10}')
     return dialog
+
+
+class LanDialog:
+    """Host or join a LAN round. Only widgets; :mod:`dib.ui` owns the sockets."""
+
+    def __init__(self, root, callbacks, port=47810):
+        self.callbacks = callbacks
+        self.top = tk.Toplevel(root)
+        top = self.top
+        top.title('局域网对战')
+        top.configure(bg=BG)
+        top.transient(root)
+        top.resizable(False, False)
+        shell = tk.Frame(top, bg=BG, padx=18, pady=14)
+        shell.pack(fill='both', expand=True)
+        tk.Label(shell, text='局域网对战', font=(FONT, 12, 'bold'), fg=TEXT, bg=BG).pack(anchor='w')
+        tk.Label(shell, text='两台电脑都打开本游戏，一人创建房间、一人加入；球台就是房主的桌面图标。',
+                 font=(FONT, 8), fg=MUTED, bg=BG, wraplength=320, justify='left').pack(anchor='w', pady=(4, 10))
+
+        self.status_text = tk.StringVar(top, '选择「创建房间」或「加入房间」')
+        self.status = tk.Label(shell, textvariable=self.status_text, font=(FONT, 9), fg=MUTED, bg=BG,
+                               wraplength=320, justify='left', anchor='w')
+        self.status.pack(fill='x')
+
+        self.address_text = tk.StringVar(top, '')
+        self.address = tk.Label(shell, textvariable=self.address_text, font=(NUMBERS, 13), fg=ACCENT,
+                                bg=BG, cursor='hand2', anchor='w')
+        self.address.pack(fill='x', pady=(6, 0))
+        self.address.bind('<ButtonRelease-1>', lambda event: self.copy_address())
+
+        Pill(shell, '创建房间', self._host, 'primary', bold=True, padx=16).pack(anchor='w', pady=(12, 0))
+
+        join = tk.Frame(shell, bg=BG)
+        join.pack(fill='x', pady=(10, 0))
+        tk.Label(join, text='房主地址', font=(FONT, 9), fg=MUTED, bg=BG).pack(side='left')
+        self.entry_text = tk.StringVar(top, f'192.168.1.10:{port}')
+        self.entry = tk.Entry(join, textvariable=self.entry_text, font=(NUMBERS, 10), width=17,
+                              bg=CARD, fg=TEXT, insertbackground=TEXT, relief='flat', bd=6)
+        self.entry.pack(side='left', padx=(6, 6))
+        Pill(join, '加入', self._join, 'soft', padx=14).pack(side='left')
+
+        Pill(shell, '关闭', self.close, 'soft', padx=14).pack(anchor='e', pady=(12, 0))
+        top.bind('<Return>', lambda event: self._join())
+        top.bind('<Escape>', lambda event: self.close())
+        top.protocol('WM_DELETE_WINDOW', self.close)
+        top.update_idletasks()
+        x = max(0, root.winfo_x() + root.winfo_width() - top.winfo_reqwidth())
+        top.geometry(f'+{x}+{root.winfo_y() + root.winfo_height() + 10}')
+        top.lift()
+
+    def alive(self):
+        return self.top is not None and self.top.winfo_exists()
+
+    def set_status(self, text, colour=None):
+        if not self.alive():
+            return
+        self.status_text.set(text)
+        self.status.configure(fg=colour or MUTED)
+
+    def set_address(self, text):
+        if self.alive():
+            self.address_text.set(text)
+
+    def copy_address(self):
+        text = self.address_text.get()
+        if text and self.alive():
+            self.top.clipboard_clear()
+            self.top.clipboard_append(text)
+            self.set_status('地址已复制，发给对手即可', ACCENT)
+
+    def _host(self):
+        self.callbacks['host']()
+
+    def _join(self):
+        self.callbacks['join'](self.entry_text.get())
+
+    def close(self):
+        if self.alive():
+            self.top.destroy()
+        self.top = None
+        self.callbacks['close']()

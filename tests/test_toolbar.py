@@ -33,13 +33,14 @@ class ToolbarTests(unittest.TestCase):
 
     def test_all_actions_are_visible_in_one_borderless_row(self):
         calls = []
-        names = ('restart', 'toggle_guide', 'toggle_rank', 'toggle_felt',
+        names = ('restart', 'toggle_guide', 'toggle_rank', 'lan', 'toggle_felt',
                  'check_updates', 'donate', 'quit', 'open_credit')
         callbacks = {name: lambda name=name: calls.append(name) for name in names}
         panel = MainPanel(self.root, config.VERSION, callbacks, config.CREDIT)
         self.root.update()
         self.assertTrue(self.root.overrideredirect())
-        self.assertEqual(set(panel.pills), {'restart', 'guide', 'rank', 'felt', 'update', 'donate', 'quit'})
+        self.assertEqual(set(panel.pills),
+                         {'restart', 'guide', 'rank', 'lan', 'felt', 'update', 'donate', 'quit'})
         positions = [pill.winfo_rooty() for pill in panel.pills.values()]
         self.assertLessEqual(max(positions) - min(positions), 2)
         for pill in panel.pills.values():

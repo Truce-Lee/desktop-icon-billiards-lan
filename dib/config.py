@@ -49,3 +49,6 @@ HOTKEY_VK = 0x58  # X
 # Ctrl+Alt+H hides the game and shows the real desktop (boss key); press it again to continue.
 HIDE_HOTKEY_ID = 0x5A33
 HIDE_HOTKEY_VK = 0x48  # H
+
+# LAN play: the host listens on this TCP port (see dib/net.py).
+LAN_PORT = 47810

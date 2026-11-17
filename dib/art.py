@@ -221,8 +221,21 @@ def pocket_particles(frame, index, fade):
     return frame
 
 
-def cue_art(cue, thickness=1):
-    """Draw a cue from ``(tip, tail)``; returns ``(frame, offset_x, offset_y)``."""
+CUE_TONES = {
+    # (outline, shaft, grip, tip) — the local cue keeps the wooden look, the opponent's
+    # is mint with an amber tip so a glance at the table says whose turn it is.
+    'local': ((60, 37, 22, 220), (239, 193, 126, 255), (127, 79, 48, 255), (126, 207, 228, 255)),
+    'opponent': ((16, 46, 42, 220), (150, 235, 210, 255), (46, 120, 104, 255), (242, 176, 122, 255)),
+}
+
+
+def cue_art(cue, thickness=1, tone='local'):
+    """Draw a cue from ``(tip, tail)``; returns ``(frame, offset_x, offset_y)``.
+
+    ``tone`` is ``local`` (wooden) or ``opponent`` (mint), so a LAN round shows at a
+    glance which cue is the other player's.
+    """
+    outline, shaft, grip_colour, tip_colour = CUE_TONES.get(tone, CUE_TONES['local'])
     tip, tail = cue
     side = math.ceil(math.dist(tip, tail)) + 18
     x = round((tip[0] + tail[0] - side) / 2)
@@ -232,9 +245,9 @@ def cue_art(cue, thickness=1):
     grip = (start[0] + (end[0] - start[0]) * .37, start[1] + (end[1] - start[1]) * .37)
     frame = Image.new('RGBA', (side, side))
     draw = ImageDraw.Draw(frame)
-    draw.line((start, end), fill=(60, 37, 22, 220), width=round(7 * thickness))
-    draw.line((start, end), fill=(239, 193, 126, 255), width=round(4 * thickness))
-    draw.line((start, grip), fill=(127, 79, 48, 255), width=round(5 * thickness))
+    draw.line((start, end), fill=outline, width=round(7 * thickness))
+    draw.line((start, end), fill=shaft, width=round(4 * thickness))
+    draw.line((start, grip), fill=grip_colour, width=round(5 * thickness))
     r = 2 * thickness
-    draw.ellipse((end[0] - r, end[1] - r, end[0] + r, end[1] + r), fill=(126, 207, 228, 255))
+    draw.ellipse((end[0] - r, end[1] - r, end[0] + r, end[1] + r), fill=tip_colour)
     return frame, x, y

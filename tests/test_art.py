@@ -138,6 +138,16 @@ class CueArtTests(unittest.TestCase):
         thick_alpha = ImageStat.Stat(thick.getchannel('A')).sum[0]
         self.assertGreater(thick_alpha, thin_alpha)
 
+    def test_the_opponent_cue_uses_a_different_colour(self):
+        cue = ((120., 90.), (20., 90.))
+        local, x, y = cue_art(cue, 1.65, 'local')
+        opponent, _, _ = cue_art(cue, 1.65, 'opponent')
+        self.assertEqual(local.size, opponent.size)
+        self.assertNotEqual(local.tobytes(), opponent.tobytes())
+        middle = (round((cue[0][0] + cue[1][0]) / 2 - x), round((cue[0][1] + cue[1][1]) / 2 - y))
+        self.assertGreater(local.getpixel(middle)[3], 0)
+        self.assertNotEqual(local.getpixel(middle), opponent.getpixel(middle))
+
 
 class FormatDurationTests(unittest.TestCase):
     def test_formats_whole_milliseconds(self):

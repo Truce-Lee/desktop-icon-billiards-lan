@@ -842,11 +842,14 @@ class BilliardsOverlay:
                 win32gui.ShowWindow(self.table_windows['cue'], win32con.SW_HIDE)
                 self.cue_key = None
             return
-        key = tuple(round(value) for point in cue for value in point)
+        # A LAN round draws the opponent's cue in a different tone, so it is obvious
+        # whose shot the table is showing.
+        tone = 'opponent' if self.lan is not None and not self.lan.local_turn else 'local'
+        key = (tuple(round(value) for point in cue for value in point), tone)
         if key == self.cue_key:
             return
         hwnd = self.table_windows.get('cue') or self.table_window('cue')
-        self.present(hwnd, *cue_art(cue, thickness=1.65))
+        self.present(hwnd, *cue_art(cue, thickness=1.65, tone=tone))
         if self.cue_key is None:
             self.position_layer(hwnd, win32con.HWND_TOP,
                                 win32con.SWP_SHOWWINDOW | win32con.SWP_NOZORDER)

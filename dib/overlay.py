@@ -588,8 +588,10 @@ class BilliardsOverlay:
             self.table.pause(now)
         else:
             win32gui.ShowWindow(self.listview, win32con.SW_HIDE)
-            for hwnd in self.windows:
-                win32gui.ShowWindow(hwnd, shown)
+            for index, hwnd in enumerate(self.windows):
+                # A LAN round trims the rack; surplus icon windows stay hidden.
+                if index < len(self.table.icons):
+                    win32gui.ShowWindow(hwnd, shown)
             rail = self.table_windows.get('rail')
             if rail and self.want_felt:
                 win32gui.ShowWindow(rail, shown)

@@ -24,7 +24,8 @@ TCP，4 字节大端长度 + UTF-8 JSON，单条上限 256 KiB。所有坐标归
 | 主 → 客 | `welcome` | `v`、`balls`、`names` | 房主应答；双方版本不一致时客机报错 |
 | 客 → 主 | `shot` | `aim:[dx,dy]`、`power` | 击球意图 |
 | 客 → 主 | `place` | `x`、`y` | 自由球摆位（归一化） |
-| 主 → 客 | `state` | `round`、`state`、`clock`、`sunk`、`bodies[[x,y,vx,vy,angle,impact]]`、`aim`、`charge`、`match`、`events` | 30 Hz；待机时降到 2 Hz |
+| 客 → 主 | `aim` | `aim:[dx,dy]`、`charge` | 客机瞄准时以 15 Hz 镜像方向与力度，房主据此画出对方的球杆 |
+| 主 → 客 | `state` | `round`、`state`、`clock`、`sunk`、`bodies[[x,y,vx,vy,angle,impact]]`、`aim`、`charge`、`match`、`events` | 30 Hz；待机（球停着、对手在瞄准）时降到 10 Hz，让对方的球杆看起来是连续的 |
 | 客 → 主 | `event` | `kind:"restart"` | 请求重开 |
 | 双向 | `bye` | — | 主动断开 |
 
@@ -35,6 +36,7 @@ TCP，4 字节大端长度 + UTF-8 JSON，单条上限 256 KiB。所有坐标归
 - 每进一颗图标得 1 分，进球方继续击球。
 - 白球入袋或空杆（这一杆没碰到任何图标）判犯规，换对手击球；白球入袋后由 `BilliardsMotion` 的 `ball_in_hand` 流程处理摆位。
 - 台面清空即结束，分高者胜，同分算平局。
+- **对手回合时能看到对方的球杆**：房主的 `aim`/`charge` 随状态帧带回，客机用 `aim` 消息镜像自己的瞄准；两端都把「当前击球方」的方向和力度写进 `table.aim` / `table.charge`，所以 `cue()` 画出来的永远是正在瞄准的那根杆。辅助线仍然只给击球方自己（对手只看得到方向和球杆，看不到预测路线）。
 - 联机对局**不提交全球排名**：房主可以随意伪造比赛结果，成绩不可信。
 
 ## 代码结构

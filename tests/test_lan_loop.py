@@ -141,5 +141,55 @@ class LoopbackTests(unittest.TestCase):
         self.assertEqual(self.host.match.scores, [0, 0])
 
 
+    def test_host_aim_is_visible_to_the_guest(self):
+        now = self.wait_started()
+        self.host.match.turn = 0
+        self.host_table.aim = (0.6, 0.8)
+        self.host_table.charge = 0.5
+        for index in range(80):
+            stamp = now + index / 60
+            self.host.pump(stamp)
+            self.host.after_step(stamp)
+            self.guest.pump(stamp)
+            self.guest.render(stamp)
+            time.sleep(.002)
+        self.assertAlmostEqual(self.guest.table.aim[0], 0.6, places=3)
+        self.assertAlmostEqual(self.guest.table.aim[1], 0.8, places=3)
+        self.assertAlmostEqual(self.guest.table.charge, 0.5, places=2)
+
+    def test_guest_aim_is_visible_on_the_host(self):
+        now = self.wait_started()
+        self.host.match.turn = 1
+        for index in range(90):  # the guest has to learn that it is its turn first
+            stamp = now + index / 60
+            self.host.pump(stamp)
+            self.host.after_step(stamp)
+            self.guest.pump(stamp)
+            self.guest.render(stamp)
+            time.sleep(.002)
+        self.assertTrue(self.guest.local_turn)
+
+        self.guest.table.aim = (0.0, -1.0)
+        self.guest.table.charge = 0.7
+        for index in range(90):
+            stamp = now + 3 + index / 60
+            self.guest.pump(stamp)          # mirrors the local aim to the host
+            self.host.pump(stamp)           # receives it
+            self.host.after_step(stamp)     # shows it on the host table
+            time.sleep(.002)
+        self.assertAlmostEqual(self.host.remote_aim[0], 0.0, places=3)
+        self.assertAlmostEqual(self.host.remote_aim[1], -1.0, places=3)
+        self.assertAlmostEqual(self.host_table.aim[1], -1.0, places=3)
+        self.assertAlmostEqual(self.host_table.charge, 0.7, places=2)
+
+    def test_shooter_keeps_its_own_aim(self):
+        now = self.wait_started()
+        self.host.match.turn = 0
+        self.host.remote_aim = (0.0, 1.0)
+        self.host_table.aim = (1.0, 0.0)
+        self.host.after_step(now + 1.0)
+        self.assertEqual(self.host_table.aim, (1.0, 0.0))
+
+
 if __name__ == '__main__':
     unittest.main()

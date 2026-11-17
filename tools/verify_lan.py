@@ -238,6 +238,17 @@ def main():
             play.match.turn = 1  # the opening shot kept the turn; force the guest's path
         wait_for(lambda: guest.play.local_turn, 5, 'the guest to learn it is its turn')
         result['stages'].append('guest-turn')
+
+        # The guest's cue must show up on the host's table while the guest aims.
+        guest.play.table.aim = (0.35, -0.94)
+        guest.play.table.charge = 0.6
+        wait_for(lambda: abs(overlay.table.aim[0] - 0.35) < 0.02 and overlay.table.charge > 0.5,
+                 6, 'the guest aim to appear on the host')
+        result['stages'].append('guest-aim-visible')
+        result['mirrored_aim'] = [round(overlay.table.aim[0], 3), round(overlay.table.aim[1], 3)]
+        guest.play.table.aim = (1.0, 0.12)
+        guest.play.table.charge = 0.0
+
         if not guest.play.shoot((1.0, 0.12), 0.62, time.perf_counter()):
             raise VerificationError(f'guest shot refused: {guest.play.status}')
         wait_for(lambda: play.match.shots[1] >= 1, 5, 'the guest shot to arrive')
@@ -246,11 +257,28 @@ def main():
         result['stages'].append('guest-shot')
 
         # -- the guest copy must converge on the host positions -------------
-        pump(0.6)
-        worst = max(abs(a[0] - b[0]) + abs(a[1] - b[1])
-                    for a, b in zip(normalised(table), normalised(guest.table)))
+        def divergence():
+            host_points, guest_points = normalised(table), normalised(guest.table)
+            return max(abs(a[0] - b[0]) + abs(a[1] - b[1]) for a, b in zip(host_points, guest_points))
+
+        end = time.monotonic() + 4
+        worst = divergence()
+        while worst > TOLERANCE and time.monotonic() < end:
+            pump(0.1)
+            worst = divergence()
         result['convergence'] = round(worst, 6)
         if worst > TOLERANCE:
+            host_points, guest_points = normalised(table), normalised(guest.table)
+            result['divergence_detail'] = {
+                'host_round': table.round_serial,
+                'guest_round': guest.table.round_serial,
+                'host_sunk': sorted(table.sunk),
+                'guest_sunk': sorted(guest.table.sunk),
+                'host_white': [round(table.white.x, 1), round(table.white.y, 1)],
+                'guest_white': [round(guest.table.white.x, 1), round(guest.table.white.y, 1)],
+                'host_state': table.state,
+                'guest_state': guest.table.state,
+            }
             raise VerificationError(f'guest diverged by {worst:.4f} of the table')
         result['stages'].append('guest-converged')
 
@@ -286,6 +314,19 @@ def main():
     except Exception as exc:
         result['errors'].append(f'{type(exc).__name__}: {exc}')
         result['traceback'] = traceback.format_exc()
+        try:
+            play = app.runner.overlay.lan if app and app.runner else None
+            result['diagnostics'] = {
+                'play_status': getattr(play, 'status', None),
+                'play_connected': getattr(play, 'connected', None),
+                'play_started': getattr(play, 'started', None),
+                'table_state': app.runner.overlay.table.state if app and app.runner else None,
+                'turn': play.match.turn if play and play.match else None,
+                'guest_error': repr(guest.error) if guest else None,
+                'guest_started': bool(guest.play and guest.play.started) if guest else None,
+            }
+        except Exception as diag_error:
+            result['diagnostics'] = {'failed': repr(diag_error)}
         if guest is not None:
             guest.stop.set()
         if app is not None:

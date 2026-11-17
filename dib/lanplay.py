@@ -14,7 +14,7 @@ from . import net
 from .match import Match
 
 STATE_HZ = 30
-IDLE_HZ = 2
+IDLE_HZ = 10  # while the table is still, mainly to mirror the opponent's aim
 
 
 class LanPlay:
@@ -40,6 +40,11 @@ class LanPlay:
         self._curr = None
         self._curr_at = 0.0
         self._frame_at = 0.0
+        # What the opponent is aiming at right now, so both players see one cue.
+        self.remote_aim = (1.0, 0.0)
+        self.remote_charge = 0.0
+        self._aim_sent = 0.0
+        self._last_aim = None
 
     # -- properties --------------------------------------------------------
     @property
@@ -98,12 +103,18 @@ class LanPlay:
                 self._fail(event.get('error') or '网络错误')
             elif kind == 'close':
                 self._closed()
+        if not self.is_host:
+            self._send_aim(now)
 
     def after_step(self, now):
         """Host only: run the rules against the stepped table, then stream a frame."""
         if self.error is not None or not self.started:
             return
         self.match.observe()
+        if self.match.turn == 1:
+            # Show the guest's cue on the host's table while the guest aims.
+            self.table.aim = self.remote_aim
+            self.table.charge = self.remote_charge
         self._stream(now)
 
     def render(self, now):
@@ -113,6 +124,24 @@ class LanPlay:
         span = max(1 / 240, self._curr_at - self._prev_at)
         alpha = min(1.0, (now - self._frame_at) / span)
         net.apply_state(self.table, net.blend_state(self._prev, self._curr, alpha), keep_aim=True)
+        if not self.local_turn:
+            # Show the host's cue on the guest's table while the host aims.
+            self.table.aim = self.remote_aim
+            self.table.charge = self.remote_charge
+
+    def _send_aim(self, now):
+        """Guest only: mirror the local aim to the host, throttle to 15 Hz."""
+        if not (self.started and self.connected and self.local_turn):
+            return
+        if self.table.state != 'ready' or now - self._aim_sent < 1 / 15:
+            return
+        aim = (round(float(self.table.aim[0]), 3), round(float(self.table.aim[1]), 3))
+        charge = round(float(self.table.charge), 2)
+        if (aim, charge) == self._last_aim:
+            return
+        self._last_aim = (aim, charge)
+        self._aim_sent = now
+        self.endpoint.send({'t': net.AIM, 'aim': list(aim), 'charge': charge})
 
     def _opened(self):
         self.connected = True
@@ -159,6 +188,11 @@ class LanPlay:
             ok, reason = self.match.place(1, message.get('x', .5), message.get('y', .5))
             if not ok:
                 self.status = reason
+        elif kind == net.AIM and self.is_host:
+            aim = message.get('aim') or (1., 0.)
+            if len(aim) == 2:
+                self.remote_aim = (float(aim[0]), float(aim[1]))
+                self.remote_charge = max(0.0, min(1.0, float(message.get('charge') or 0.)))
         elif kind == net.STATE and not self.is_host:
             self._receive(message, now)
         elif kind == net.EVENT and self.is_host:
@@ -193,6 +227,10 @@ class LanPlay:
         self._prev, self._prev_at = self._curr, self._curr_at
         self._curr, self._curr_at = payload, now
         self._frame_at = now
+        aim = payload.get('aim')
+        if aim and len(aim) == 2:
+            self.remote_aim = (float(aim[0]), float(aim[1]))
+        self.remote_charge = max(0.0, min(1.0, float(payload.get('charge') or 0.)))
         if payload.get('match'):
             self.remote = payload['match']
             self.remote['names'] = self.remote.get('names') or self.names

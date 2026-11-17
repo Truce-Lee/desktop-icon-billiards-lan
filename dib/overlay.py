@@ -268,7 +268,9 @@ class TablePointer:
         self.send = None
 
     def update(self, game, now, x, y, down, over_table):
-        if over_table:
+        # Only the player whose turn it is owns the aim; otherwise the opponent's
+        # mirrored aim (written by LanPlay) would be overwritten every frame.
+        if over_table and self.can_shoot:
             game.aim_at(x, y)
         if down and not self.was_down and over_table:
             if game.state == 'ball_in_hand':
@@ -860,7 +862,12 @@ class BilliardsOverlay:
         return self.luma_map.getpixel((px, py)) if 0 <= px < width and 0 <= py < height else None
 
     def draw_guide(self):
-        lines, circles = self.table.aim_preview() if self.guide_enabled and self.transition is None else ((), ())
+        # The predicted path is only for the player about to shoot; the opponent sees
+        # the cue and the aim direction, not the plan behind it.
+        local_turn = self.lan is None or self.lan.local_turn
+        lines, circles = (self.table.aim_preview()
+                          if self.guide_enabled and self.transition is None and local_turn
+                          else ((), ()))
         rounded = [(role, (round(x0), round(y0)), (round(x1), round(y1)))
                    for role, (x0, y0), (x1, y1) in lines]
         lines_key = tuple((role, start, end) for role, start, end in rounded if start != end)

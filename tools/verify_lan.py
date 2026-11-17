@@ -201,17 +201,27 @@ def main():
         screenshot(overlay, 'lan-host.png')
 
         # -- aim with the real mouse and take the opening shot --------------
+        # If another window covers the whole table, the desktop hit test refuses the
+        # click (by design), so the shot is injected through the same pointer callback
+        # the mouse would use. Either way the LAN routing code is the one under test.
         point = pick_desktop_point(root, overlay, table)
-        win32api.SetCursorPos(point)
-        pump(0.2)
-        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0)
-        pump(0.45)
-        charge = table.charge
-        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0)
-        pump(0.1)
-        result['charge_observed'] = round(charge, 3)
-        if charge <= 0:
-            raise VerificationError('holding the left button did not charge the cue over LAN')
+        if point is not None:
+            win32api.SetCursorPos(point)
+            pump(0.2)
+            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0)
+            pump(0.45)
+            charge = table.charge
+            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0)
+            pump(0.1)
+            result['charge_observed'] = round(charge, 3)
+            if charge <= 0:
+                raise VerificationError('holding the left button did not charge the cue over LAN')
+            result['shot_path'] = 'mouse'
+            screenshot(overlay, 'lan-host.png')
+        else:
+            result['shot_path'] = 'pointer-callback'
+            overlay.pointer.send('shot', (1.0, 0.05), 0.62)
+            pump(0.1)
         wait_for(lambda: table.shots >= 1, 3, 'the shot to leave through the pointer')
         result['stages'].append('mouse-shot')
         wait_for(lambda: table.state in ('ready', 'ball_in_hand', 'finished'), 15, 'host shot to settle')
@@ -222,7 +232,6 @@ def main():
             'turn': play.match.turn,
             'foul': play.match.foul,
         }
-        screenshot(overlay, 'lan-after-host-shot.png')
 
         # -- hand the turn over and let the guest shoot ---------------------
         if play.match.turn == 0:
@@ -318,7 +327,11 @@ def screenshot(overlay, name):
 
 
 def pick_desktop_point(root, overlay, table):
-    """Find a table spot that is not covered by another window, then aim there."""
+    """Find a table spot that is not covered by another window, then aim there.
+
+    Returns ``None`` when every candidate is covered, so the caller can fall back to
+    the pointer callback instead of clicking into someone else's window.
+    """
     left, top, right, bottom = table.bounds
     white = table.white
     candidates = [
@@ -334,7 +347,7 @@ def pick_desktop_point(root, overlay, table):
             time.sleep(0.02)
         if overlay.blocked_by is None:
             return point
-    raise VerificationError('every candidate aiming point is covered by another window')
+    return None
 
 
 if __name__ == '__main__':

@@ -8,21 +8,10 @@ Windows 10 / 11 x64 · 单文件 EXE · MIT
 >
 > 本项目源自 [liuxiaogang-com/desktop-icon-billiards](https://github.com/liuxiaogang-com/desktop-icon-billiards)（MIT，作者 **LXG**），原始代码与美术资产的版权归原作者所有，[LICENSE](LICENSE) 保持原样。
 >
-> 本仓库由 [Truce-Lee](https://github.com/Truce-Lee) 独立维护，**不是原仓库的 GitHub fork**，与原作者没有隶属关系，也不代表原作者的发布。
->
 > 相对上游 v0.1.5，这里新增了**局域网双人对战**：房主权威物理、30 Hz 快照流、回合与犯规规则、可选监听网卡与端口、对手球杆可视化，详见 [docs/LAN.md](docs/LAN.md)。
 >
-> 注意：下面「下载」一节给的是**上游官方版本**，它没有联机功能；本仓库的构建请用 `build.ps1` 自行打包，或使用本仓库 Release 里的 EXE。
 
 ![实机画面：桌面图标排成球阵，白球瞄准库边，虚线显示反弹路线](docs/images/desktop-gameplay.jpg)
-
-## 下载
-
-Windows 版 v0.1.5 为单文件 EXE。[GitHub 下载](https://github.com/liuxiaogang-com/desktop-icon-billiards/releases/download/v0.1.5/DesktopIconBilliards-0.1.5-win-x64.exe) · [CNB 国内镜像](https://cnb.cool/liuxiaogang/desktop-icon-billiards/-/releases/download/v0.1.5/DesktopIconBilliards-0.1.5-win-x64.exe)
-
-`desktop-icon-billiards` 的源码和发布附件在两个平台同步。[GitHub 仓库](https://github.com/liuxiaogang-com/desktop-icon-billiards) · [CNB 国内镜像仓库](https://cnb.cool/liuxiaogang/desktop-icon-billiards)
-
-官网入口为 [桌面图标台球](https://go.liuxiaogang.com/zmtq)。
 
 ## 玩法
 
@@ -43,16 +32,6 @@ Windows 版 v0.1.5 为单文件 EXE。[GitHub 下载](https://github.com/liuxiao
 - 联机对局**不提交全球排名**。
 - 第一次开房间时 Windows 会弹出防火墙提示，需要允许「专用网络」；没有提示说明已被现有规则拦截，请到「Windows 安全中心 → 防火墙」放行。
 - 协议、规则与无窗口测试方法见 [docs/LAN.md](docs/LAN.md)。
-
-### 计时与全球排名
-
-- 用时从**第一杆击出**算起，到最后一颗图标入袋为止，精确到毫秒。开球前的瞄准不计时。清台后会显示「本局平均 X 秒/颗」，也就是总用时除以图标总数。
-- 球数固定在 **15～45 颗**。桌面图标少于 15 个时，复制现有图标补足到 15 颗；多于 45 个时只取其中 45 个，优先快捷方式和程序，其次是文件，文件夹排在最后，同类按桌面顺序取。主窗口会显示「桌面 N 个图标，复制补到 / 取其中 X 颗」。补球和落选的图标都只在游戏画面里生效，不会改动桌面，退出后照常恢复。
-- 「全球排名」**默认关闭**。第一次启动会弹出一次询问，选「是」才开启，选「否」不会上传任何东西；之后可随时用主窗口的「排名」按钮开关。开启后，每局清台时提交一次成绩，用平均每颗用时排名。
-- 开启排名需要联网，没有网络或服务不可用时游戏不受影响，只是这一局不计入排名。
-- 每局清台后会弹出**成绩卡片**：游戏名与图标、段位（传奇球王、桌面球王、大师、高手、熟手、新秀）、全球名次和超过的玩家比例、用时、平均每颗用时、图标数、击球数和个人最佳，底部带有作者标记。点「保存图片」会存成 1080×1350 的 PNG（在「图片」文件夹的 `DesktopIconBilliards` 里），点「复制图片」可直接粘贴到微信、QQ 或帖子里。卡片只含成绩，不会出现你的桌面图标和文件名；没开启排名时卡片以平均每颗用时为主，并提示开启排名。
-
-![成绩卡片示例：大师段位，全球第 1,204 名，超过 87% 的玩家](docs/images/result-card.png)
 
 ### 窗口与隐藏
 
@@ -104,14 +83,6 @@ pwsh -File build.ps1
 只有主动开启「全球排名」后，游戏才会联网上传：每局的用时、图标数量、击球次数，以及一个匿名设备标识（由本机系统 ID 加盐哈希得到，无法还原）。不会上传图标名称、桌面截图或文件信息。设备凭据保存在 `%APPDATA%\DesktopIconBilliards\rank.json`。排名服务的地址由 `dib/config.py` 中的 `DEFAULT_RANK_URL` 指定，开发时可用环境变量 `DIB_RANK_URL` 覆盖；排名服务端在 [desktop-icon-billiards-server](https://cnb.cool/liuxiaogang/desktop-icon-billiards-server)。
 
 退出时会恢复桌面，独立看门狗也会在游戏进程异常退出后尝试恢复。运行记录位于 `%TEMP%\DesktopIconBilliards`。游戏期间若更改分辨率、DPI 或屏幕布局，本局会停止并恢复桌面。桌面图标需处于显示状态，同一时间只运行一个实例。
-
-## 打赏
-
-如果你喜欢这个项目，可以用微信扫码赞赏。感谢支持！
-
-<img src="assets/donation.jpg" alt="微信赞赏码" width="240">
-
-[打开赞赏图片](assets/donation.jpg)
 
 ## 许可证
 

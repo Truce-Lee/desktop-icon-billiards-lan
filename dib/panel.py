@@ -345,7 +345,8 @@ def show_update_dialog(root, current, info, entries, on_download):
 class LanDialog:
     """Host or join a LAN round. Only widgets; :mod:`dib.ui` owns the sockets."""
 
-    def __init__(self, root, callbacks, port=47810):
+    def __init__(self, root, callbacks, port=47810, adapters=(), host='', saved_port=None,
+                 join_text=None):
         self.callbacks = callbacks
         self.top = tk.Toplevel(root)
         top = self.top
@@ -357,25 +358,50 @@ class LanDialog:
         shell.pack(fill='both', expand=True)
         tk.Label(shell, text='局域网对战', font=(FONT, 12, 'bold'), fg=TEXT, bg=BG).pack(anchor='w')
         tk.Label(shell, text='两台电脑都打开本游戏，一人创建房间、一人加入；球台就是房主的桌面图标。',
-                 font=(FONT, 8), fg=MUTED, bg=BG, wraplength=320, justify='left').pack(anchor='w', pady=(4, 10))
+                 font=(FONT, 8), fg=MUTED, bg=BG, wraplength=340, justify='left').pack(anchor='w', pady=(4, 10))
 
         self.status_text = tk.StringVar(top, '选择「创建房间」或「加入房间」')
         self.status = tk.Label(shell, textvariable=self.status_text, font=(FONT, 9), fg=MUTED, bg=BG,
-                               wraplength=320, justify='left', anchor='w')
+                               wraplength=340, justify='left', anchor='w')
         self.status.pack(fill='x')
 
-        self.address_text = tk.StringVar(top, '')
-        self.address = tk.Label(shell, textvariable=self.address_text, font=(NUMBERS, 13), fg=ACCENT,
-                                bg=BG, cursor='hand2', anchor='w')
-        self.address.pack(fill='x', pady=(6, 0))
-        self.address.bind('<ButtonRelease-1>', lambda event: self.copy_address())
+        # -- which interface the room listens on -------------------------------
+        self._hosts = {'全部网卡（默认）': ''}
+        labels = ['全部网卡（默认）']
+        for address, name in adapters or ():
+            label = f'{name} — {address}'
+            while label in self._hosts:
+                label += ' '
+            self._hosts[label] = address
+            labels.append(label)
+        default = next((label for label, value in self._hosts.items() if value == host), labels[0])
+
+        network = tk.Frame(shell, bg=BG)
+        network.pack(fill='x', pady=(10, 0))
+        tk.Label(network, text='监听', font=(FONT, 9), fg=MUTED, bg=BG).pack(side='left')
+        self.adapter_text = tk.StringVar(top, default)
+        self.adapter = ttk.Combobox(network, textvariable=self.adapter_text, values=labels,
+                                    state='readonly', width=24, font=(FONT, 8))
+        self.adapter.pack(side='left', padx=(6, 8))
+        tk.Label(network, text='端口', font=(FONT, 9), fg=MUTED, bg=BG).pack(side='left')
+        self.port_text = tk.StringVar(top, str(saved_port or port))
+        self.port_entry = tk.Entry(network, textvariable=self.port_text, font=(NUMBERS, 10), width=6,
+                                   bg=CARD, fg=TEXT, insertbackground=TEXT, relief='flat', bd=5)
+        self.port_entry.pack(side='left', padx=(6, 0))
 
         Pill(shell, '创建房间', self._host, 'primary', bold=True, padx=16).pack(anchor='w', pady=(12, 0))
+
+        self.address_text = tk.StringVar(top, '')
+        self.address = tk.Label(shell, textvariable=self.address_text, font=(NUMBERS, 11), fg=ACCENT,
+                                bg=BG, cursor='hand2', anchor='w', justify='left', wraplength=340)
+        self.address.pack(fill='x', pady=(8, 0))
+        self.address.bind('<ButtonRelease-1>', lambda event: self.copy_address())
 
         join = tk.Frame(shell, bg=BG)
         join.pack(fill='x', pady=(10, 0))
         tk.Label(join, text='房主地址', font=(FONT, 9), fg=MUTED, bg=BG).pack(side='left')
-        self.entry_text = tk.StringVar(top, f'192.168.1.10:{port}')
+        self.entry_text = tk.StringVar(
+            top, join_text or f'192.168.1.10:{saved_port or port}')
         self.entry = tk.Entry(join, textvariable=self.entry_text, font=(NUMBERS, 10), width=17,
                               bg=CARD, fg=TEXT, insertbackground=TEXT, relief='flat', bd=6)
         self.entry.pack(side='left', padx=(6, 6))
@@ -403,18 +429,40 @@ class LanDialog:
         if self.alive():
             self.address_text.set(text)
 
+    def selected_host(self):
+        """The interface to bind to; an empty string means every interface."""
+        return self._hosts.get(self.adapter_text.get(), '')
+
+    def port_value(self):
+        text = (self.port_text.get() or '').strip()
+        if not text.isdigit() or not 0 < int(text) < 65536:
+            raise ValueError('端口要是 1–65535 的数字')
+        return int(text)
+
+    def join_value(self):
+        return (self.entry_text.get() or '').strip()
+
     def copy_address(self):
-        text = self.address_text.get()
-        if text and self.alive():
-            self.top.clipboard_clear()
-            self.top.clipboard_append(text)
-            self.set_status('地址已复制，发给对手即可', ACCENT)
+        text = self.address_text.get().strip()
+        if not text or not self.alive():
+            return
+        lines = text.splitlines()
+        self.top.clipboard_clear()
+        self.top.clipboard_append(lines[0])
+        self.set_status(f'已复制 {lines[0]}' +
+                        ('；有多个地址时挑对手能连通的那个' if len(lines) > 1 else '，发给对手即可'),
+                        ACCENT)
 
     def _host(self):
-        self.callbacks['host']()
+        try:
+            port = self.port_value()
+        except ValueError as error:
+            self.set_status(str(error), WARN)
+            return
+        self.callbacks['host'](self.selected_host(), port)
 
     def _join(self):
-        self.callbacks['join'](self.entry_text.get())
+        self.callbacks['join'](self.join_value())
 
     def close(self):
         if self.alive():

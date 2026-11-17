@@ -133,6 +133,38 @@ class LinkTests(unittest.TestCase):
         client.close('test')
 
 
+class AddressTests(unittest.TestCase):
+    def test_local_addresses_look_like_usable_ipv4(self):
+        rows = net.local_ipv4_all()
+        self.assertIsInstance(rows, list)
+        for address, name in rows:
+            self.assertRegex(address, r'^\d{1,3}(\.\d{1,3}){3}$')
+            self.assertTrue(name)
+            self.assertFalse(address.startswith(('0.', '127.', '169.254.')))
+
+    def test_server_advertises_every_reachable_address(self):
+        server = net.Server(0).start()
+        try:
+            addresses = server.addresses()
+            self.assertTrue(addresses)
+            for address in addresses:
+                self.assertTrue(address.endswith(f':{server.port}'), address)
+            self.assertEqual(server.address, addresses[0])
+        finally:
+            server.close('test')
+
+    def test_binding_one_interface_advertises_only_it(self):
+        rows = net.local_ipv4_all()
+        if not rows:
+            self.skipTest('no non-loopback IPv4 address on this machine')
+        address = rows[0][0]
+        server = net.Server(0, address).start()
+        try:
+            self.assertEqual(server.addresses(), [f'{address}:{server.port}'])
+        finally:
+            server.close('test')
+
+
 class StateTransferTests(unittest.TestCase):
     def test_positions_survive_a_different_table_size(self):
         host = make_table(15, (0, 0, 1600, 900))

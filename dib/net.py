@@ -20,6 +20,7 @@ only calls :meth:`Link.send` (never blocks; a full outbox drops the message) and
 """
 from __future__ import annotations
 
+import ctypes
 import json
 import queue
 import socket
@@ -78,6 +79,83 @@ def local_ipv4():
         return '127.0.0.1'
     finally:
         probe.close()
+
+
+class _IpAddressString(ctypes.Structure):
+    pass
+
+
+_IpAddressString._fields_ = [
+    ('Next', ctypes.POINTER(_IpAddressString)),
+    ('IpAddress', ctypes.c_char * 16),
+    ('IpMask', ctypes.c_char * 16),
+    ('Context', ctypes.c_ulong),
+]
+
+
+class _IpAdapterInfo(ctypes.Structure):
+    pass
+
+
+_IpAdapterInfo._fields_ = [
+    ('Next', ctypes.POINTER(_IpAdapterInfo)),
+    ('ComboIndex', ctypes.c_ulong),
+    ('AdapterName', ctypes.c_char * 260),
+    ('Description', ctypes.c_char * 132),
+    ('AddressLength', ctypes.c_ulong),
+    ('Address', ctypes.c_ubyte * 8),
+    ('Index', ctypes.c_ulong),
+    ('Type', ctypes.c_ulong),
+    ('DhcpEnabled', ctypes.c_ulong),
+    ('CurrentIpAddress', ctypes.POINTER(_IpAddressString)),
+    ('IpAddressList', _IpAddressString),
+    ('GatewayList', _IpAddressString),
+    ('DhcpServer', _IpAddressString),
+    ('HaveWins', ctypes.c_int),
+    ('PrimaryWinsServer', _IpAddressString),
+    ('SecondaryWinsServer', _IpAddressString),
+    ('LeaseObtained', ctypes.c_ulong),
+    ('LeaseExpires', ctypes.c_ulong),
+]
+
+
+def local_ipv4_all():
+    """Every IPv4 address this machine can be reached on, as ``[(ip, adapter name)]``.
+
+    Windows machines usually have several: Wi-Fi, Ethernet, a VPN, Hyper-V/virtual
+    adapters. The host picks the one both players can reach; this list is what the
+    dialog offers.
+    """
+    try:
+        iphlp = ctypes.WinDLL('iphlpapi', use_last_error=True)
+        size = ctypes.c_ulong(0)
+        iphlp.GetAdaptersInfo(None, ctypes.byref(size))
+        if not size.value:
+            return []
+        buffer = ctypes.create_string_buffer(size.value)
+        if iphlp.GetAdaptersInfo(buffer, ctypes.byref(size)) != 0:
+            return []
+    except OSError:
+        return []
+
+    rows, seen = [], set()
+    adapter = ctypes.cast(buffer, ctypes.POINTER(_IpAdapterInfo))
+    while adapter:
+        info = adapter.contents
+        name = info.Description.decode('mbcs', 'replace').strip() or '网卡'
+        entry = ctypes.pointer(info.IpAddressList)
+        while entry:
+            address = entry.contents.IpAddress.decode('ascii', 'replace').strip()
+            if address and address not in seen and not address.startswith(('0.', '127.', '169.254.')):
+                seen.add(address)
+                rows.append((address, name))
+            entry = entry.contents.Next
+        adapter = info.Next
+    # The interface Windows routes the internet through is the best default; keep the
+    # rest in adapter order so a VPN or a second NIC stays one click away.
+    primary = local_ipv4()
+    rows.sort(key=lambda row: 0 if row[0] == primary else 1)
+    return rows
 
 
 def parse_address(text, default_port=DEFAULT_PORT):
@@ -268,9 +346,16 @@ class Server:
         self.events.put({'t': 'listening', 'port': self.port})
         return self
 
+    def addresses(self):
+        """Every ``ip:port`` a guest can use, given the interface this server bound to."""
+        if self.host:
+            return [format_address(self.host, self.port)]
+        rows = [format_address(ip, self.port) for ip, _ in local_ipv4_all()]
+        return rows or [format_address(local_ipv4(), self.port)]
+
     @property
     def address(self):
-        return format_address(local_ipv4(), self.port)
+        return self.addresses()[0]
 
     def _accept_loop(self):
         while not self._closing.is_set():

@@ -23,7 +23,7 @@ from .display import dpi_context
 from .hotkeys import Hotkeys
 from .instance import acquire_instance, claim_instance_mutex, publish_version
 from .lanplay import LanPlay
-from .net import Client as LanClient, Server as LanServer, parse_address
+from .net import Client as LanClient, Server as LanServer, local_ipv4_all, parse_address
 from .overlay import BilliardsOverlay
 from .panel import ACCENT, LanDialog, MainPanel, ResultDialog, WARN, format_duration, show_update_dialog
 from .paths import runtime_directory
@@ -400,28 +400,39 @@ class DesktopBilliardsApp:
         if self.lan_dialog is not None and self.lan_dialog.alive():
             self.lan_dialog.top.lift()
             return
+        adapters = local_ipv4_all()
+        saved_host = self.settings.get('lan_host') or ''
+        if saved_host and all(address != saved_host for address, _ in adapters):
+            saved_host = ''
         self.lan_dialog = LanDialog(self.root, {
             'host': self.host_lan, 'join': self.join_lan, 'close': self.forget_lan_dialog,
-        }, config.LAN_PORT)
+        }, config.LAN_PORT, adapters=adapters, host=saved_host,
+            saved_port=self.settings.get('lan_port'), join_text=self.settings.get('lan_join'))
 
     def forget_lan_dialog(self):
         self.lan_dialog = None
 
-    def host_lan(self):
-        """Listen on the LAN port and wait for one opponent."""
+    def host_lan(self, host='', port=None):
+        """Listen on the chosen interface (empty = all of them) and wait for one opponent."""
         if self.lan_endpoint is not None:
             return
+        port = int(port or config.LAN_PORT)
         overlay = self.runner.overlay
         try:
-            endpoint = LanServer(config.LAN_PORT).start()
+            endpoint = LanServer(port, host).start()
         except OSError as error:
             if self.lan_dialog is not None:
-                self.lan_dialog.set_status(f'端口 {config.LAN_PORT} 无法监听：{error}', WARN)
+                self.lan_dialog.set_status(f'无法在 {host or "全部网卡"}:{port} 监听：{error}', WARN)
             return
+        self.settings.update(lan_host=host, lan_port=port)
         self.attach_lan(overlay, 'host', endpoint)
         if self.lan_dialog is not None:
-            self.lan_dialog.set_address(endpoint.address)
-            self.lan_dialog.set_status('把上面的地址发给对手；对方点「加入」后自动开局', ACCENT)
+            addresses = endpoint.addresses()
+            self.lan_dialog.set_address('\n'.join(addresses))
+            hint = '把上面的地址发给对手；对方点「加入」后自动开局'
+            if len(addresses) > 1:
+                hint = '这几个地址都能用，挑对手能连通的那个发给他；点地址可复制'
+            self.lan_dialog.set_status(hint, ACCENT)
 
     def join_lan(self, text):
         """Connect to a host; the handshake decides whose icons become the balls."""
@@ -435,6 +446,7 @@ class DesktopBilliardsApp:
                 self.lan_dialog.set_status(str(error), WARN)
             return
         endpoint = LanClient(host, port).start()
+        self.settings.update(lan_join=f'{host}:{port}')
         self.attach_lan(overlay, 'guest', endpoint)
         if self.lan_dialog is not None:
             self.lan_dialog.set_status(f'正在连接 {host}:{port}…')
